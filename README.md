@@ -1,77 +1,81 @@
-# Text2ImageWebApp
 
-A web application for generating high-quality images from text descriptions using Stable Diffusion models. Built with Gradio for an intuitive web interface and optimised to run efficiently on consumer hardware without requiring expensive GPU resources.
+# 🖼️ Text-to-Image Web App (Stable Diffusion + Gradio)
 
-🌟 Features
+A web application for generating high-quality images from text descriptions using **Stable Diffusion** models. Built with **Gradio** for an intuitive web interface and optimized to run efficiently on **CPU-only systems**—no expensive GPUs required!
 
-Core Functionality
+---
 
-Text-to-Image Generation: Transform detailed text prompts into stunning visual artwork
+## 🌟 Features
 
-Multiple Model Support: Choose between Stable Diffusion 1.5 and 2.1 models
+### 🎨 Core Functionality
+- **Text-to-Image Generation**: Transform detailed text prompts into stunning visual artworks.
+- **Multiple Model Support**: Switch between Stable Diffusion **1.5** and **2.1** models.
+- **CPU Optimized**: Specially tuned to run on CPU-only setups.
+- **Style Presets**: Apply creative presets like *Photorealistic, Digital Art, Anime, Oil Painting, Watercolor*.
+- **Batch Generation**: Create multiple image variations in one go.
 
-CPU Optimisation: Specially tuned to run efficiently on CPU-only systems
+### ⚙️ Advanced Controls
+- **Seed Control**: Ensure reproducibility with manual/auto seed input.
+- **Custom Parameters**: Tune inference steps, guidance scale, and output resolution.
+- **Negative Prompts**: Guide the model to avoid specific elements.
+- **Smart Auto-Tuning**: Automatically adjusts size/steps for CPU performance.
 
-Style Presets: Built-in artistic styles (Photorealistic, Digital Art, Anime, Oil Painting, Watercolour)
+### 🧑‍💻 User Experience
+- **Modern Gradio UI**: Sleek interface accessible via any browser.
+- **Generation History**: View your last 5 creations with prompt/seed info.
+- **Memory Monitor**: Track real-time memory usage.
+- **Inactivity Handling**: Auto-unloads model after 10 min idle.
+- **Tips & Help Tab**: Best practices and how-to instructions built-in.
 
-Batch Generation: Create multiple variations with a single click
+---
 
-Advanced Controls
+## 🚀 Quick Start
 
-Seed Control: Reproducible results with manual or automatic seed selection
+### ✅ Prerequisites
+- Python 3.8+
+- At least 8GB RAM (16GB recommended)
+- ~15GB free disk space
+- Internet connection (for model download)
 
-Generation Parameters: Fine-tune steps, guidance scale, and image dimensions
+---
 
-Negative Prompts: Specify what to avoid in generated images
+### 🔧 Installation
 
-Smart Parameter Adjustment: Automatic optimisation for CPU performance
-
-User Experience
-
-Intuitive Web Interface: Clean, modern Gradio-based UI accessible via web browser
-
-Generation History: Keep track of recent creations with metadata
-
-System Monitoring: Real-time memory usage tracking
-
-Comprehensive Help: Built-in tips and best practices
-
-Progress Tracking: Real-time status updates during generation                                                                    
-🚀 Quick Start
-
-Prerequisites
-
-Python 3.8 or higher
-
-8GB RAM minimum (16GB recommended)
-
-15GB free disk space (for models and generated images)
-
-Stable internet connection for initial model download
-
-Installation
-
-Clone or download this repository
-
-git clone <Text2ImageWebApp>
-
+1. **Clone the repository**
+```bash
+git clone https://github.com/yourusername/Text2Image-Web-App.git
 cd Text2Image-Web-App
+```
 
-Create a virtual environment (recommended)
-
+2. **Create a virtual environment (recommended)**
+```bash
 python -m venv sd_env
+source sd_env/bin/activate        # On Windows: sd_env\Scripts\activate
+```
 
-source sd_env/bin/activate  # On Windows: sd_env\Scripts\activate
-
-Install dependencies
-
+3. **Install dependencies**
+```bash
 pip install -r requirements.txt
+```
 
-Run the application
-
+4. **Run the app**
+```bash
 python app.py
+```
 
-Open your browser and navigate to the URL in the terminal.                                                                           
-Happy generating! 🎨
+5. **Access it via browser**
+- Navigate to the **localhost URL** shown in your terminal (default: `http://127.0.0.1:7860`)
 
-Transform your imagination into stunning visual art with the power of AI, optimised to run on your hardware.
+---
+
+## 🎉 Happy Generating!
+Unleash your creativity and turn your imagination into breathtaking AI art—directly from your own hardware.
+
+---
+
+## 📜 License
+This project is licensed under the MIT License.
+
+---
+
+
