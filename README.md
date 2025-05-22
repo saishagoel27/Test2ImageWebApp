@@ -43,15 +43,15 @@ A web application for generating high-quality images from text descriptions usin
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/yourusername/Text2Image-Web-App.git
+git clone https://github.com/saishagoel27/Text2Image-Web-App.git
 cd Text2Image-Web-App
 ```
 
 2. **Create a virtual environment (recommended)**
 ```bash
-python -m venv sd_env
-source sd_env/bin/activate
-# On Windows: sd_env\Scripts\activate
+python -m venv venv
+source venv/bin/activate
+# On Windows: .\venv\Scripts\activate
 ```
 
 3. **Install dependencies**
