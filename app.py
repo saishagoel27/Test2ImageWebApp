@@ -10,469 +10,369 @@ import threading
 from threading import Timer
 import logging
 
-# Logging configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Create directory for saved images
-os.makedirs("generated_images", exist_ok=True)
+if not os.path.exists("generated_images"):
+    os.makedirs("generated_images")
 
-# Global variables throughout the code
 pipe = None
-model_id = "runwayml/stable-diffusion-v1-5"
-session_images = []  # Store session history
-last_activity_time = time.time()
-INACTIVITY_TIMEOUT = 600  # 10 minutes of inactivity before unloading model
+current_model = "runwayml/stable-diffusion-v1-5"
+img_history = []  # keep track of recent gens
+last_used = time.time()
+IDLE_TIMEOUT = 1800  # 30 mins instead of 10
 
-# Model options to choose from
-SD_MODELS = {
-    "Stable Diffusion 1.5": "runwayml/stable-diffusion-v1-5",
-    "Stable Diffusion 2.1": "stabilityai/stable-diffusion-2-1"
+# models that will work decent on CPU
+MODELS = {
+    "SD 1.5": "runwayml/stable-diffusion-v1-5",
+    "SD 2.1": "stabilityai/stable-diffusion-2-1"
 }
 
-# Preset Styles for prompt enhancement
-STYLE_PRESETS = {
-    "None": "",
-    "Photorealistic": ", photorealistic, 8k, detailed, sharp focus",
-    "Digital Art": ", digital art, trending on artstation, highly detailed",
-    "Anime": ", anime style, vibrant colors, highly detailed",
-    "Oil Painting": ", oil painting, masterpiece, detailed brushwork, textured",
-    "Watercolor": ", watercolor painting, artistic, soft colors, flowing"
+# quick prompt boosters
+STYLES = {
+    "none": "",
+    "photo": ", photorealistic, 8k, detailed",
+    "art": ", digital art, artstation", 
+    "anime": ", anime style, vibrant",
+    "painting": ", oil painting, detailed brushwork",
+    "sketch": ", pencil sketch, artistic"  # added this one
 }
 
-def update_activity():
-    """Update the last activity timestamp"""
-    global last_activity_time
-    last_activity_time = time.time()
+def ping():
+    global last_used
+    last_used = time.time()
 
-def check_inactivity():
-    """Check for inactivity and unload model if inactive"""
-    global last_activity_time
-    if time.time() - last_activity_time > INACTIVITY_TIMEOUT:
-        if pipe is not None:
-            logger.info("Unloading model due to inactivity")
-            unload_model()
-    # Schedule the next check
-    Timer(60, check_inactivity).start()
-
-def load_model_with_progress(model_name):
-    """Load model with progress updates for UI"""
-    yield "🔄 Starting model load process..."
-    status = load_model(model_name)
-    yield status
+def check_idle():
+    global last_used
+    if time.time() - last_used > IDLE_TIMEOUT and pipe:
+        print("unloading model - been idle too long")
+        unload_model()
+    Timer(120, check_idle).start()  
+def load_model_progress(model_name):
+    """generator for UI updates"""
+    yield "loading model..."
+    result = load_model(model_name)
+    yield result
 
 def load_model(model_name):
-    """Load the selected Stable Diffusion model with optimizations"""
-    global pipe, model_id
-    update_activity()
-
-    model_id = SD_MODELS[model_name]
+    global pipe, current_model
+    ping()
+    
+    model_path = MODELS[model_name]
+    
+    if pipe and current_model == model_path:
+        return f"✅ {model_name} already loaded"
     
     try:
-        logger.info(f"Loading {model_name} on CPU...")
-        unload_model()  # Unloading previous model first
+        print(f"loading {model_name}...")
         
-        # Loading model with optimized settings
+        if pipe:
+            unload_model()
+        
+        # this usually takes 30-60 seconds on cpu
         pipe = StableDiffusionPipeline.from_pretrained(
-            model_id,
-            safety_checker=None,  # Disabling safety checker to save memory
-            torch_dtype=torch.float32,  # Using float32 for CPU
-            device_map=None,  # Explicitly disable device mapping
-            low_cpu_mem_usage=True  # Enable low CPU memory usage
+            model_path,
+            safety_checker=None,  # saves memory
+            torch_dtype=torch.float32,
+            device_map=None,
+            low_cpu_mem_usage=True
         )
         
-        # Using efficient scheduler
+        # faster scheduler 
         pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
-        
-        # Setting device to CPU explicitly for all components
         pipe = pipe.to("cpu")
         
-        # Enabling memory optimizations
+        # this helps with memory spikes
         pipe.enable_attention_slicing(slice_size="auto")
         
-        # model offloading where possible - remove this for CPU-only operation
-        # Commenting out CPU offload as it can cause issues on CPU-only systems
-        # try:
-        #     pipe.enable_model_cpu_offload()
-        # except:
-        #     logger.info("Model CPU offload not available in this diffusers version")
-        
-        #  garbage collection
+        current_model = model_path
         gc.collect()
         
-        logger.info(f"Model {model_name} loaded successfully on CPU!")
-        return f"✅ {model_name} loaded successfully on CPU"
-    
+        print(f"loaded {model_name} successfully")
+        return f"✅ {model_name} ready"
+        
     except Exception as e:
-        logger.error(f"Error loading model: {str(e)}")
-        return f"❌ Error loading model: {str(e)}"
+        print(f"failed to load model: {e}")
+        return f"❌ failed: {str(e)}"
 
 def unload_model():
-    """Unloading model to free memory"""
     global pipe
-    if pipe is not None:
-        logger.info("Unloading model from memory")
+    if pipe:
+        print("freeing model memory...")
         del pipe
         pipe = None
         gc.collect()
-        # Remove CUDA cache clearing for CPU-only operation
-        # try:
-        #     if torch.cuda.is_available():
-        #         torch.cuda.empty_cache()
-        # except Exception as e:
-        #     logger.warning(f"Skipping CUDA cleanup: {e}")
-        return "✅ Model unloaded to free memory"
-    return "⚠️ No model currently loaded"
+        return "✅ model unloaded"
+    return "no model loaded"
 
-
-def cleanup_old_images(max_files=50):
-    """Clean up old generated images to prevent disk space issues"""
+def cleanup_imgs(keep=50):
+    """don't let saved images fill up disk"""
     try:
-        files = os.listdir("generated_images")
-        if len(files) > max_files:
-            files.sort(key=lambda x: os.path.getmtime(os.path.join("generated_images", x)))
-            for old_file in files[:len(files) - max_files]:
-                os.remove(os.path.join("generated_images", old_file))
-            logger.info(f"Cleaned up {len(files) - max_files} old image files")
-    except Exception as e:
-        logger.error(f"Error cleaning up old images: {str(e)}")
+        files = [f for f in os.listdir("generated_images") if f.endswith('.png')]
+        if len(files) > keep:
+            # sort by date, remove oldest
+            files.sort(key=lambda x: os.path.getmtime(f"generated_images/{x}"))
+            for old in files[:-keep]:
+                os.remove(f"generated_images/{old}")
+            print(f"cleaned up {len(files) - keep} old images")
+    except:
+        pass  # not critical if this fails
 
-def generate_with_timeout(prompt, negative_prompt, model_name, style_preset,
-                         steps, guidance, width, height, seed, use_random_seed, timeout=300):
-    """Generate image with timeout to prevent hanging"""
-    result = [None, [], "Generation timed out"]
+def generate_safe(prompt, neg_prompt, model, style, steps, cfg, w, h, seed, random_seed, timeout=600):
+    """wrap generation in timeout to prevent hangs - 10 min timeout"""
+    result = [None, [], "timed out"]
     
-    def target():
+    def run():
         nonlocal result
-        result = generate_image(prompt, negative_prompt, model_name, style_preset,
-                                steps, guidance, width, height, seed, use_random_seed)
+        result = generate(prompt, neg_prompt, model, style, steps, cfg, w, h, seed, random_seed)
     
-    thread = threading.Thread(target=target)
-    thread.start()
-    thread.join(timeout)
+    t = threading.Thread(target=run)
+    t.daemon = True  # dies with main thread
+    t.start()
+    t.join(timeout)
     
-    if thread.is_alive():
-        logger.warning(f"Generation timed out after {timeout}s")
-        return None, [], f"⚠️ Generation timed out after {timeout}s - try simpler parameters"
+    if t.is_alive():
+        print(f"generation timed out after {timeout}s")
+        return None, [], "⚠️ timed out - try simpler settings or restart app"
     
     return result
 
-def generate_image(prompt, negative_prompt, model_name, style_preset,
-                   steps, guidance, width, height, seed, use_random_seed):
-    """Generate image with advanced options and optimization"""
-    global pipe, session_images
-    update_activity()
+def generate(prompt, neg_prompt, model_name, style, steps, cfg, width, height, seed, use_random):
+    global pipe, img_history
+    ping()
     
-    # Memory usage logging - remove GPU memory logging for CPU-only
-    # if torch.cuda.is_available():
-    #     mem_before = torch.cuda.memory_allocated() / 1024**2
-    #     logger.info(f"GPU Memory before generation: {mem_before:.2f} MB")
-    
-    # Check if model needs to be loaded or changed
-    if pipe is None or SD_MODELS[model_name] != model_id:
+    if not pipe or MODELS[model_name] != current_model:
         status = load_model(model_name)
         if "❌" in status:
             return None, [], status
 
-    # Apply style preset if selected
-    if style_preset != "None":
-        enhanced_prompt = prompt + STYLE_PRESETS[style_preset]
-    else:
-        enhanced_prompt = prompt
+    # add style if selected
+    full_prompt = prompt
+    if style != "none":
+        full_prompt += STYLES[style]
 
-    # Set seed
-    generator = None
-    if use_random_seed:
-        used_seed = random.randint(1, 2147483647)
+    # handle seed
+    if use_random:
+        seed = random.randint(1, 2**31 - 1)
     else:
-        used_seed = int(seed)
+        seed = int(seed)
     
-    # Create CPU generator
-    generator = torch.Generator(device="cpu").manual_seed(used_seed)
-
-    start_time = time.time()
-    logger.info(f"Starting generation with prompt: {prompt[:50]}...")
-
+    gen = torch.Generator(device="cpu").manual_seed(seed)
+    
+    # optimized CPU settings for faster generation
+    steps = min(int(steps), 20)  # 20 max for speed
+    width = min(int(width), 512)
+    height = min(int(height), 512)
+    
+    # force smaller sizes for very slow machines
+    if steps > 15:
+        width = min(width, 448)
+        height = min(height, 448)
+    
+    start = time.time()
+    print(f"generating: {prompt[:30]}... ({steps} steps, {width}x{height})")
+    
     try:
-        # Generating image with CPU-optimized parameters
-        actual_steps = min(int(steps), 30)  # Cap steps at 30 for CPU
-        
-        # For CPU, adjust the dimensions if they're too large
-        actual_width = min(int(width), 512)
-        actual_height = min(int(height), 512)
-        
-        if actual_width != int(width) or actual_height != int(height) or actual_steps != int(steps):
-            logger.info(f"Adjusting parameters for CPU: steps={actual_steps}, size={actual_width}x{actual_height}")
-        
         result = pipe(
-            prompt=enhanced_prompt,
-            negative_prompt=negative_prompt,
-            num_inference_steps=actual_steps,
-            guidance_scale=float(guidance),
-            width=actual_width,
-            height=actual_height,
-            generator=generator
+            prompt=full_prompt,
+            negative_prompt=neg_prompt,
+            num_inference_steps=steps,
+            guidance_scale=float(cfg),
+            width=width,
+            height=height,
+            generator=gen
         )
-
-        image = result.images[0]
-        gen_time = round(time.time() - start_time, 2)
-        logger.info(f"Generation completed in {gen_time}s")
-
-        # Saving the image
-        timestamp = int(time.time())
-        filename = f"generated_images/img_{timestamp}_{used_seed}.png"
-        image.save(filename)
-
-        # Clean up old images if they are too many
-        cleanup_old_images()
-
-        # Add to the session history with metadata
-        image_info = {
-            "image": image,
+        
+        img = result.images[0]
+        elapsed = round(time.time() - start, 1)
+        
+        # save with timestamp + seed for easy tracking
+        ts = int(time.time())
+        filename = f"generated_images/gen_{ts}_{seed}.png"
+        img.save(filename)
+        
+        cleanup_imgs()
+        
+        # update history for gallery
+        img_data = {
+            "image": img,
             "prompt": prompt,
-            "seed": used_seed,
-            "time": gen_time,
+            "seed": seed,
+            "time": elapsed,
             "file": filename
         }
         
-        # Limiting session history size for memory efficiency
-        session_images.append(image_info)
-        if len(session_images) > 5:
-            session_images = session_images[-5:]
+        img_history.append(img_data)
+        if len(img_history) > 6:  # keep last 6
+            img_history = img_history[-6:]
         
-        # Return only recent history
-        recent_images = [info["image"] for info in session_images]
-
-        # Log memory usage after generation - remove GPU logging for CPU-only
-        # if torch.cuda.is_available():
-        #     mem_after = torch.cuda.memory_allocated() / 1024**2
-        #     logger.info(f"GPU Memory after generation: {mem_after:.2f} MB")
-
-        return image, recent_images, f"Image generated in {gen_time}s (Seed: {used_seed})"
-
+        gallery_imgs = [item["image"] for item in img_history]
+        
+        print(f"done in {elapsed}s")
+        return img, gallery_imgs, f"✅ generated in {elapsed}s (seed: {seed})"
+        
     except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Generation error: {error_msg}")
-        if "CUDA" in error_msg or "meta" in error_msg.lower():
-            return None, [], "❌ Device Error: Model loading failed - try reloading the model"
-        elif "attention_mask" in error_msg:
-            return None, [], "❌ Model processing error: Try a different prompt"
-        return None, [], f"❌ Error: {error_msg}"
+        error = str(e)
+        print(f"generation failed: {error}")
+        
+        # common error handling
+        if "cuda" in error.lower() or "meta" in error.lower():
+            return None, [], "❌ model issue - try reloading"
+        if "memory" in error.lower():
+            return None, [], "❌ out of memory - try smaller image"
+        
+        return None, [], f"❌ error: {error[:50]}..."
 
-def batch_generate(prompt, negative_prompt, model_name, style_preset,
-                  steps, guidance, width, height, seed, use_random_seed, count=3):
-    """Generate multiple images in batch mode"""
-    images = []
-    status_messages = []
+# basic batch mode
+def batch_gen(prompt, neg_prompt, model, style, steps, cfg, w, h, seed, use_random, count):
+    results = []
     
     for i in range(count):
-        current_seed = seed + i if not use_random_seed else random.randint(1, 2147483647)
+        current_seed = seed + i if not use_random else random.randint(1, 2**31-1)
         
-        yield f"Generating image {i+1}/{count}...", None, []
+        yield f"batch {i+1}/{count}...", None, []
         
-        image, _, status = generate_image(
-            prompt, negative_prompt, model_name, style_preset,
-            steps, guidance, width, height, current_seed, False
-        )
-        
-        if image is not None:
-            images.append(image)
-            status_messages.append(status)
+        img, _, status = generate(prompt, neg_prompt, model, style, steps, cfg, w, h, current_seed, False)
+        if img:
+            results.append(img)
     
-    return f"Batch generation complete. {len(images)}/{count} successful.", images, status_messages
+    return f"batch done: {len(results)}/{count} success", results, []
 
-# Developing the Gradio interface
-with gr.Blocks(title="Advanced Text-to-Image Generator") as demo:
-    gr.Markdown("# Advanced Text-to-Image Generator")
-    gr.Markdown("Generate high-quality images from text descriptions with CPU-optimized settings.")
-
+# UI setup with Gradio
+with gr.Blocks(title="SD Image Generator") as app:
+    gr.Markdown("# Stable Diffusion Generator")
+    gr.Markdown("*CPU optimized - expect 30-90 seconds per image*")
+    
     with gr.Tab("Generate"):
         with gr.Row():
-            with gr.Column(scale=1):
-                # Model selection and parameters
-                model_dropdown = gr.Dropdown(
-                    choices=list(SD_MODELS.keys()),
-                    value="Stable Diffusion 1.5",
-                    label="Select Model"
+            with gr.Column():
+                model_select = gr.Dropdown(
+                    choices=list(MODELS.keys()),
+                    value="SD 1.5",
+                    label="Model"
                 )
                 
-                model_status = gr.Textbox(label="Model Status")
-                load_btn = gr.Button("Load/Change Model")
-                unload_btn = gr.Button("Unload Model (Free Memory)")
-
-                style_dropdown = gr.Dropdown(
-                    choices=list(STYLE_PRESETS.keys()),
-                    value="None",
-                    label="Style Preset"
+                model_status = gr.Textbox(label="Status", interactive=False)
+                
+                with gr.Row():
+                    load_btn = gr.Button("Load Model", variant="secondary")
+                    unload_btn = gr.Button("Unload", variant="secondary")
+                
+                style_select = gr.Dropdown(
+                    choices=list(STYLES.keys()),
+                    value="none",
+                    label="Style boost"
                 )
-
-                with gr.Accordion("Generation Settings", open=False):
-                    steps_slider = gr.Slider(10, 50, 20, step=1, label="Inference Steps (CPU: max 30)")
-                    guidance_slider = gr.Slider(1.0, 15.0, 7.5, step=0.1, label="Guidance Scale")
-
-                    with gr.Row():
-                        width_slider = gr.Slider(256, 768, 512, step=64, label="Width (CPU: max 512)")
-                        height_slider = gr.Slider(256, 768, 512, step=64, label="Height (CPU: max 512)")
-
-                    with gr.Row():
-                        seed_number = gr.Number(42, label="Seed")
-                        random_seed = gr.Checkbox(True, label="Use Random Seed")
-                        
-                    with gr.Row():
-                        batch_size = gr.Slider(1, 5, 1, step=1, label="Batch Size (1 = single image)")
-
-                prompt_input = gr.Textbox(
+                
+                prompt = gr.Textbox(
                     label="Prompt",
-                    placeholder="Describe the image you want to generate",
+                    placeholder="a cat sitting on a windowsill",
                     lines=3
                 )
-
-                negative_prompt = gr.Textbox(
-                    label="Negative Prompt (what to avoid)",
-                    placeholder="Low quality, blurry, distorted face",
-                    lines=2,
-                    value="low quality, blurry, worst quality, distorted"
+                
+                neg_prompt = gr.Textbox(
+                    label="Negative prompt",
+                    value="blurry, low quality, distorted",
+                    lines=2
                 )
-
-                generate_btn = gr.Button("Generate Image", variant="primary")
-                status_output = gr.Textbox(label="Status")
-
-            with gr.Column(scale=1):
-                # Result display and gallery
-                image_output = gr.Image(label="Generated Image", type="pil")
-
-                with gr.Accordion("Generation History", open=True):
-                    gallery = gr.Gallery(
-                        label="Recent Generations",
-                        show_label=True,
-                        elem_id="gallery"
-                    )
+                
+                with gr.Accordion("Settings", open=False):
+                    steps = gr.Slider(8, 25, 15, step=1, label="Steps (15 recommended for speed)")
+                    cfg = gr.Slider(3.0, 12.0, 7.0, step=0.5, label="CFG Scale")
                     
-                with gr.Accordion("System Monitor", open=False):
-                    mem_usage = gr.Textbox(label="Memory Usage")
-                    refresh_btn = gr.Button("Refresh System Stats")
-
-    with gr.Tab("Help & Tips"):
+                    with gr.Row():
+                        width = gr.Slider(256, 512, 448, step=64, label="Width (448 for speed)")
+                        height = gr.Slider(256, 512, 448, step=64, label="Height")
+                    
+                    with gr.Row():
+                        seed = gr.Number(42, label="Seed")
+                        random_seed = gr.Checkbox(True, label="Random seed")
+                    
+                    batch_count = gr.Slider(1, 3, 1, step=1, label="Batch size (max 3)")
+                
+                gen_btn = gr.Button("Generate", variant="primary", size="lg")
+                status = gr.Textbox(label="Generation status", interactive=False)
+            
+            with gr.Column():
+                output_img = gr.Image(label="Result", type="pil")
+                
+                with gr.Accordion("Recent", open=True):
+                    gallery = gr.Gallery(label="History", show_label=False)
+                
+                # simple memory monitor
+                with gr.Accordion("System", open=False):
+                    mem_info = gr.Textbox(label="Memory", interactive=False)
+                    refresh_mem = gr.Button("Refresh")
+    
+    with gr.Tab("Quick Tips"):
         gr.Markdown("""
-        ## Tips for Better Results
-        ### Effective Prompts
-        - Be specific and detailed in your descriptions
-        - Mention lighting, style, camera angle if relevant
-        - Use artistic references ("in the style of...")
-        ### Negative Prompts
-        Use negative prompts to avoid common issues:
-        - "low quality, blurry, worst quality" - Avoid poor quality
-        - "distorted face, bad anatomy" - Fix common anatomy issues
-        - "text, watermark" - Avoid text in images
-        ### CPU Optimization Tips
-        - For CPU mode: 512x512 or smaller is recommended
-        - Lower steps (20-30) work best for CPU generation
-        - Expect 1-2 minutes per image on CPU
-        - Unload model when not in use to free memory
-        ### Seed Control
-        - Uncheck "Random Seed" and use the same seed to create variations with different prompts
-        - Save seeds of images you like to recreate similar compositions
-        """)
+        ## Speed Tips
+        - **15 steps** = good quality, fast (30-60s)
+        - **448x448** = faster than 512x512
+        - **Lower CFG** (5-7) = faster generation
         
-    with gr.Tab("About"):
-        gr.Markdown("""
-        ## Advanced Text-to-Image Generator
-        This application runs Stable Diffusion entirely on CPU with optimizations for memory usage and performance.
+        ## Good Prompts
+        - "a red car on a mountain road, digital art"
+        - "portrait of a woman, oil painting style"
+        - "sunset over ocean, photorealistic"
         
-        ### Technical Details
-        - Models: Stable Diffusion 1.5 and 2.1
-        - Scheduler: DPMSolverMultistepScheduler (faster than default)
-        - Memory optimization: Attention slicing, model offloading
-        - Automatic timeout prevention and resource management
-        
-        ### System Requirements
-        - CPU: Minimum 4 cores recommended
-        - RAM: Minimum 8GB, 16GB recommended
-        - Generation Time: 1-3 minutes per image depending on settings
+        ## If it's slow
+        - Try 10-12 steps max
+        - Use 384x384 or smaller
+        - Close other programs
+        - Restart if it gets stuck
         """)
 
-    # Defining update function for system monitor
-    def update_system_stats():
-        mem_info = "CPU Memory: Not available"
-        # Remove GPU memory monitoring for CPU-only operation
-        # if torch.cuda.is_available():
-        #     mem_allocated = torch.cuda.memory_allocated() / 1024**2
-        #     mem_reserved = torch.cuda.memory_reserved() / 1024**2
-        #     mem_info = f"GPU Memory: {mem_allocated:.2f}MB allocated, {mem_reserved:.2f}MB reserved"
-        # else:
+    # memory checker
+    def get_memory():
         try:
             import psutil
-            vm = psutil.virtual_memory()
-            mem_info = f"System Memory: {vm.percent}% used, {vm.available / 1024**3:.2f}GB available"
-        except ImportError:
-            mem_info = "System Memory: psutil not available - install with 'pip install psutil'"
-        except Exception as e:
-            mem_info = f"System Memory: Error reading stats - {str(e)}"
-        return mem_info
+            mem = psutil.virtual_memory()
+            return f"{mem.percent:.1f}% used, {mem.available/1024**3:.1f}GB free"
+        except:
+            return "install psutil for memory info"
 
-    # Setting up event handlers
-    load_btn.click(
-        fn=load_model_with_progress,
-        inputs=[model_dropdown],
-        outputs=[model_status]
-    )
+    # connecting the UI
+    load_btn.click(load_model_progress, [model_select], [model_status])
+    unload_btn.click(unload_model, [], [model_status])
+    refresh_mem.click(get_memory, [], [mem_info])
     
-    unload_btn.click(
-        fn=unload_model,
-        inputs=[],
-        outputs=[model_status]
-    )
-    
-    refresh_btn.click(
-        fn=update_system_stats,
-        inputs=[],
-        outputs=[mem_usage]
-    )
-
-    def handle_generation(prompt, negative_prompt, model_name, style_preset,
-                        steps, guidance, width, height, seed, use_random_seed, batch_count):
-        if batch_count <= 1:
-            # Single image generation
-            return generate_with_timeout(
-                prompt, negative_prompt, model_name, style_preset,
-                steps, guidance, width, height, seed, use_random_seed
-            )
+    def handle_gen(*args):
+        prompt, neg_prompt, model, style, steps, cfg, w, h, seed, rand_seed, batch = args
+        
+        if batch <= 1:
+            return generate_safe(prompt, neg_prompt, model, style, steps, cfg, w, h, seed, rand_seed)
         else:
-            # Batch generation
-            generator = batch_generate(
-                prompt, negative_prompt, model_name, style_preset,
-                steps, guidance, width, height, seed, use_random_seed, batch_count
-            )
-            # Process the generator for batch mode
-            for status_update, img, imgs in generator:
-                if img is not None:
-                    return img, imgs, status_update
-            return None, [], "Batch generation failed"
-
-    generate_btn.click(
-        fn=handle_generation,
-        inputs=[
-            prompt_input,
-            negative_prompt,
-            model_dropdown,
-            style_dropdown,
-            steps_slider,
-            guidance_slider,
-            width_slider,
-            height_slider,
-            seed_number,
-            random_seed,
-            batch_size
-        ],
-        outputs=[image_output, gallery, status_output]
+            # batch mode
+            gen = batch_gen(prompt, neg_prompt, model, style, steps, cfg, w, h, seed, rand_seed, batch)
+            for update in gen:
+                if update[1] is not None:  # got results
+                    return update
+            return None, [], "batch failed"
+    
+    gen_btn.click(
+        handle_gen,
+        [prompt, neg_prompt, model_select, style_select, steps, cfg, 
+         width, height, seed, random_seed, batch_count],
+        [output_img, gallery, status]
     )
 
-    # Starting the inactivity checker
-    Timer(60, check_inactivity).start()
-    
-    # will Load the default model at start
-    demo.load(fn=lambda: load_model("Stable Diffusion 1.5"))
+# start idle checker - less frequent
+Timer(120, check_idle).start()
 
-# Launch the app
+# auto-load default model when the app starts
+def init_model():
+    return load_model("SD 1.5"), "App ready - model loading..."
+
+app.load(init_model, [], [model_status, status])
+
 if __name__ == "__main__":
-    demo.launch()
+    app.launch(
+        server_name="0.0.0.0",  # accessible from other devices
+        server_port=7860,
+        share=True,
+        inbrowser=True,  # auto open the browser
+        show_error=True
+    )
