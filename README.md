@@ -70,7 +70,7 @@ python app.py
 ---
 
 ## 🎉 Happy Generating!
-Unleash your creativity and turn your imagination into breathtaking AI art—directly from your hardware.
+Unleash your creativity and turn your imagination into breathtaking AI art, directly from your hardware.
 
 ---
 
