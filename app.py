@@ -76,23 +76,26 @@ def load_model(model_name):
         pipe = StableDiffusionPipeline.from_pretrained(
             model_id,
             safety_checker=None,  # Disabling safety checker to save memory
-            torch_dtype=torch.float32  # Using float32 for CPU
+            torch_dtype=torch.float32,  # Using float32 for CPU
+            device_map=None,  # Explicitly disable device mapping
+            low_cpu_mem_usage=True  # Enable low CPU memory usage
         )
         
         # Using efficient scheduler
         pipe.scheduler = DPMSolverMultistepScheduler.from_config(pipe.scheduler.config)
         
-        # Setting device to CPU
+        # Setting device to CPU explicitly for all components
         pipe = pipe.to("cpu")
         
         # Enabling memory optimizations
         pipe.enable_attention_slicing(slice_size="auto")
         
-        # model offloading where possible
-        try:
-            pipe.enable_model_cpu_offload()
-        except:
-            logger.info("Model CPU offload not available in this diffusers version")
+        # model offloading where possible - remove this for CPU-only operation
+        # Commenting out CPU offload as it can cause issues on CPU-only systems
+        # try:
+        #     pipe.enable_model_cpu_offload()
+        # except:
+        #     logger.info("Model CPU offload not available in this diffusers version")
         
         #  garbage collection
         gc.collect()
@@ -112,11 +115,12 @@ def unload_model():
         del pipe
         pipe = None
         gc.collect()
-        try:
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except Exception as e:
-            logger.warning(f"Skipping CUDA cleanup: {e}")
+        # Remove CUDA cache clearing for CPU-only operation
+        # try:
+        #     if torch.cuda.is_available():
+        #         torch.cuda.empty_cache()
+        # except Exception as e:
+        #     logger.warning(f"Skipping CUDA cleanup: {e}")
         return "✅ Model unloaded to free memory"
     return "⚠️ No model currently loaded"
 
@@ -134,7 +138,7 @@ def cleanup_old_images(max_files=50):
         logger.error(f"Error cleaning up old images: {str(e)}")
 
 def generate_with_timeout(prompt, negative_prompt, model_name, style_preset,
-                         steps, guidance, width, height, seed, use_random_seed, timeout=180):
+                         steps, guidance, width, height, seed, use_random_seed, timeout=300):
     """Generate image with timeout to prevent hanging"""
     result = [None, [], "Generation timed out"]
     
@@ -159,10 +163,10 @@ def generate_image(prompt, negative_prompt, model_name, style_preset,
     global pipe, session_images
     update_activity()
     
-    # Memory usage logging
-    if torch.cuda.is_available():
-        mem_before = torch.cuda.memory_allocated() / 1024**2
-        logger.info(f"GPU Memory before generation: {mem_before:.2f} MB")
+    # Memory usage logging - remove GPU memory logging for CPU-only
+    # if torch.cuda.is_available():
+    #     mem_before = torch.cuda.memory_allocated() / 1024**2
+    #     logger.info(f"GPU Memory before generation: {mem_before:.2f} MB")
     
     # Check if model needs to be loaded or changed
     if pipe is None or SD_MODELS[model_name] != model_id:
@@ -182,7 +186,9 @@ def generate_image(prompt, negative_prompt, model_name, style_preset,
         used_seed = random.randint(1, 2147483647)
     else:
         used_seed = int(seed)
-        generator = torch.Generator().manual_seed(used_seed)  # CPU generator
+    
+    # Create CPU generator
+    generator = torch.Generator(device="cpu").manual_seed(used_seed)
 
     start_time = time.time()
     logger.info(f"Starting generation with prompt: {prompt[:50]}...")
@@ -237,24 +243,24 @@ def generate_image(prompt, negative_prompt, model_name, style_preset,
         # Return only recent history
         recent_images = [info["image"] for info in session_images]
 
-        # Log memory usage after generation
-        if torch.cuda.is_available():
-            mem_after = torch.cuda.memory_allocated() / 1024**2
-            logger.info(f"GPU Memory after generation: {mem_after:.2f} MB")
+        # Log memory usage after generation - remove GPU logging for CPU-only
+        # if torch.cuda.is_available():
+        #     mem_after = torch.cuda.memory_allocated() / 1024**2
+        #     logger.info(f"GPU Memory after generation: {mem_after:.2f} MB")
 
         return image, recent_images, f"Image generated in {gen_time}s (Seed: {used_seed})"
 
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Generation error: {error_msg}")
-        if "CUDA" in error_msg:
-            return None, [], "❌ Memory Error: Try reducing image size or steps further"
+        if "CUDA" in error_msg or "meta" in error_msg.lower():
+            return None, [], "❌ Device Error: Model loading failed - try reloading the model"
         elif "attention_mask" in error_msg:
             return None, [], "❌ Model processing error: Try a different prompt"
         return None, [], f"❌ Error: {error_msg}"
 
 def batch_generate(prompt, negative_prompt, model_name, style_preset,
-                  steps, guidance, width, height, seed, count=3):
+                  steps, guidance, width, height, seed, use_random_seed, count=3):
     """Generate multiple images in batch mode"""
     images = []
     status_messages = []
@@ -388,17 +394,20 @@ with gr.Blocks(title="Advanced Text-to-Image Generator") as demo:
     # Defining update function for system monitor
     def update_system_stats():
         mem_info = "CPU Memory: Not available"
-        if torch.cuda.is_available():
-            mem_allocated = torch.cuda.memory_allocated() / 1024**2
-            mem_reserved = torch.cuda.memory_reserved() / 1024**2
-            mem_info = f"GPU Memory: {mem_allocated:.2f}MB allocated, {mem_reserved:.2f}MB reserved"
-        else:
-            try:
-                import psutil
-                vm = psutil.virtual_memory()
-                mem_info = f"System Memory: {vm.percent}% used, {vm.available / 1024**3:.2f}GB available"
-            except:
-                pass
+        # Remove GPU memory monitoring for CPU-only operation
+        # if torch.cuda.is_available():
+        #     mem_allocated = torch.cuda.memory_allocated() / 1024**2
+        #     mem_reserved = torch.cuda.memory_reserved() / 1024**2
+        #     mem_info = f"GPU Memory: {mem_allocated:.2f}MB allocated, {mem_reserved:.2f}MB reserved"
+        # else:
+        try:
+            import psutil
+            vm = psutil.virtual_memory()
+            mem_info = f"System Memory: {vm.percent}% used, {vm.available / 1024**3:.2f}GB available"
+        except ImportError:
+            mem_info = "System Memory: psutil not available - install with 'pip install psutil'"
+        except Exception as e:
+            mem_info = f"System Memory: Error reading stats - {str(e)}"
         return mem_info
 
     # Setting up event handlers
@@ -432,7 +441,7 @@ with gr.Blocks(title="Advanced Text-to-Image Generator") as demo:
             # Batch generation
             generator = batch_generate(
                 prompt, negative_prompt, model_name, style_preset,
-                steps, guidance, width, height, seed, batch_count
+                steps, guidance, width, height, seed, use_random_seed, batch_count
             )
             # Process the generator for batch mode
             for status_update, img, imgs in generator:
