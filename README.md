@@ -43,7 +43,7 @@ A web application for generating high-quality images from text descriptions usin
 
 1. **Clone the repository**
 ```bash
-git clone [https://github.com/saishagoel27/Text2ImageWebApp.git]
+git clone https://github.com/saishagoel27/Text2ImageWebApp.git
 cd Text2ImageWebApp
 ```
 
