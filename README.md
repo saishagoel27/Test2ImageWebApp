@@ -3,6 +3,8 @@
 
 A web application for generating high-quality images from text descriptions using **Stable Diffusion** models. Built with **Gradio** for an intuitive web interface and optimised to run efficiently on **CPU-only systems**, no expensive GPUs required!
 
+The app is also deployed on Hugging Face Spaces, You can try it out https://huggingface.co/spaces/saishagoel/text2image-app
+
 ---
 
 ## 🌟 Features
