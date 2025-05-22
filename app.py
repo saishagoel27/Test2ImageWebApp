@@ -100,9 +100,9 @@ def generate_image(prompt, negative_prompt, model_name, style_preset,
     except Exception as e:
         return None, [], f"Error: {e}"
 
-with gr.Blocks(title="CPU Image Generator") as app:
-    gr.Markdown("# Text-to-Image Generator (CPU Mode)")
-    gr.Markdown("Generate images using Stable Diffusion models on CPU")
+with gr.Blocks(title="Image Generator") as app:
+    gr.Markdown("# Text-to-Image Generator")
+    gr.Markdown("Generate images using Stable Diffusion models optimized for CPU Compability")
 
     with gr.Tab("Generate"):
         with gr.Row():
