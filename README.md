@@ -1,7 +1,7 @@
 
 # 🖼️ Text-to-Image Web App (Stable Diffusion + Gradio)
 
-A web application for generating high-quality images from text descriptions using **Stable Diffusion** models. Built with **Gradio** for an intuitive web interface and optimised to run efficiently on **CPU-only systems**—no expensive GPUs required!
+A web application for generating high-quality images from text descriptions using **Stable Diffusion** models. Built with **Gradio** for an intuitive web interface and optimised to run efficiently on **CPU-only systems**, no expensive GPUs required!
 
 ---
 
