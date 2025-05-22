@@ -105,16 +105,21 @@ def load_model(model_name):
         return f"❌ Error loading model: {str(e)}"
 
 def unload_model():
-    """Explicitly unload model to free memory"""
+    """Unloading model to free memory"""
     global pipe
     if pipe is not None:
         logger.info("Unloading model from memory")
         del pipe
         pipe = None
         gc.collect()
-        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception as e:
+            logger.warning(f"Skipping CUDA cleanup: {e}")
         return "✅ Model unloaded to free memory"
     return "⚠️ No model currently loaded"
+
 
 def cleanup_old_images(max_files=50):
     """Clean up old generated images to prevent disk space issues"""
